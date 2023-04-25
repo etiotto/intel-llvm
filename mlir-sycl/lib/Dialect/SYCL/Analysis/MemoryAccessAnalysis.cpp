@@ -8,6 +8,10 @@
 
 #include "mlir/Dialect/SYCL/Analysis/MemoryAccessAnalysis.h"
 #include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Polygeist/IR/Ops.h"
+#include "mlir/Dialect/SYCL/IR/SYCLOps.h"
+#include "mlir/Dialect/SYCL/Utils.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
@@ -642,6 +646,30 @@ MemoryAccess<OpTy>::classifyMemoryAccess(DataFlowSolver &solver) const {
   return MemoryAccessPattern::Unknown;
 }
 
+//===----------------------------------------------------------------------===//
+// MemoryAccessAnalysis
+//===----------------------------------------------------------------------===//
+
+template <typename OpTy, MemoryAccessAnalysis::IsValidTy<OpTy>>
+MemoryAccessPattern MemoryAccessAnalysis::classifyMemoryAccess(OpTy op) const {
+  // Affine load/store operation involving SYCL accessors are expected to have
+  // no indices (the memref operand is expected to contain the correct address).
+  if (!op.getIndices().size() != 1)
+    return MemoryAccessPattern::Unknown;
+
+  // TODO: Ensure the index is a zero constant.
+  auto in = op.getIndices();
+
+  TypedValue<MemRefType> memRef = op.getMemref();
+  Operation *definingOp = memRef.getDefiningOp();
+
+  // The memref operand should be given by a SYCL subscript operation on an
+  // accessor.
+  Optional<sycl::AccessorPtrType> opAccessor =
+      sycl::getAccessorUsedByOperation(*definingOp);
+  if (!opAccessor.has_value())
+    return MemoryAccessPattern::Unknown;
+}
 namespace mlir {
 namespace sycl {
 

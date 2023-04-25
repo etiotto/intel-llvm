@@ -13,6 +13,7 @@
 #ifndef MLIR_DIALECT_POLYGEIST_UTILS_TRANSFORMUTILS_H
 #define MLIR_DIALECT_POLYGEIST_UTILS_TRANSFORMUTILS_H
 
+#include "mlir/Dialect/SYCL/IR/SYCLTypes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
@@ -271,13 +272,11 @@ public:
 /// overlap.
 class VersionConditionBuilder {
 public:
-  using AccessorPtrType = TypedValue<MemRefType>;
-  using AccessorPtrPairType = std::pair<AccessorPtrType, AccessorPtrType>;
   using SCFCondition = VersionCondition::SCFCondition;
   using AffineCondition = VersionCondition::AffineCondition;
 
   VersionConditionBuilder(
-      ArrayRef<AccessorPtrPairType> requireNoOverlapAccessorPairs,
+      ArrayRef<sycl::AccessorPtrPairType> requireNoOverlapAccessorPairs,
       OpBuilder builder, Location loc)
       : accessorPairs(requireNoOverlapAccessorPairs), builder(builder),
         loc(loc) {
@@ -294,7 +293,7 @@ private:
   /// Create a versioning condition suitable for scf::IfOp.
   SCFCondition createSCFCondition(OpBuilder builder, Location loc) const;
 
-  ArrayRef<AccessorPtrPairType> accessorPairs;
+  ArrayRef<sycl::AccessorPtrPairType> accessorPairs;
   mutable OpBuilder builder;
   mutable Location loc;
 };

@@ -6,8 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Polygeist/Transforms/Passes.h"
-
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -15,10 +13,12 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Polygeist/IR/Ops.h"
 #include "mlir/Dialect/Polygeist/IR/Polygeist.h"
+#include "mlir/Dialect/Polygeist/Transforms/Passes.h"
 #include "mlir/Dialect/Polygeist/Utils/TransformUtils.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SYCL/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/SYCL/IR/SYCLOps.h"
+#include "mlir/Dialect/SYCL/Utils.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/IntegerSet.h"
@@ -41,9 +41,6 @@ namespace polygeist {
 } // namespace mlir
 
 using namespace mlir;
-using AccessorPtrType = polygeist::VersionConditionBuilder::AccessorPtrType;
-using AccessorPtrPairType =
-    polygeist::VersionConditionBuilder::AccessorPtrPairType;
 
 static llvm::cl::opt<bool> EnableLICMSYCLAccessorVersioning(
     "enable-licm-sycl-accessor-versioning", llvm::cl::init(true),
@@ -336,12 +333,12 @@ public:
 
   void addPrerequisite(Operation &op) { prerequisites.push_back(&op); }
 
-  ArrayRef<AccessorPtrPairType> getRequireNoOverlapAccessorPairs() const {
+  ArrayRef<sycl::AccessorPtrPairType> getRequireNoOverlapAccessorPairs() const {
     return requireNoOverlapAccessorPairs;
   }
 
-  void addRequireNoOverlapAccessorPairs(AccessorPtrType acc1,
-                                        AccessorPtrType acc2) {
+  void addRequireNoOverlapAccessorPairs(sycl::AccessorPtrType acc1,
+                                        sycl::AccessorPtrType acc2) {
     requireNoOverlapAccessorPairs.push_back({acc1, acc2});
   }
 
@@ -351,25 +348,8 @@ private:
   SmallVector<Operation *> prerequisites;
   /// Pairs of accessors that are required to not overlap for this operation to
   /// be invariant.
-  SmallVector<AccessorPtrPairType> requireNoOverlapAccessorPairs;
+  SmallVector<sycl::AccessorPtrPairType> requireNoOverlapAccessorPairs;
 };
-
-/// Return the accessor used by \p op if found, and nullptr otherwise.
-static Optional<AccessorPtrType>
-getAccessorUsedByOperation(const Operation &op) {
-  auto getMemrefOp = [](const Operation &op) {
-    return TypeSwitch<const Operation &, Operation *>(op)
-        .Case<AffineLoadOp, AffineStoreOp>(
-            [](auto &affineOp) { return affineOp.getMemref().getDefiningOp(); })
-        .Default([](auto &) { return nullptr; });
-  };
-
-  auto accSub =
-      dyn_cast_or_null<sycl::SYCLAccessorSubscriptOp>(getMemrefOp(op));
-  if (accSub)
-    return accSub.getAcc();
-  return std::nullopt;
-}
 
 /// Determine whether any operation in the \p loop has a conflict with the
 /// given operation in LICMCandidate \p candidate that prevents hoisting the
@@ -400,8 +380,10 @@ static bool hasConflictsInLoop(LICMCandidate &candidate,
       continue;
     }
 
-    Optional<AccessorPtrType> opAccessor = getAccessorUsedByOperation(op);
-    Optional<AccessorPtrType> otherAccessor = getAccessorUsedByOperation(other);
+    Optional<sycl::AccessorPtrType> opAccessor =
+        sycl::getAccessorUsedByOperation(op);
+    Optional<sycl::AccessorPtrType> otherAccessor =
+        sycl::getAccessorUsedByOperation(other);
     if (opAccessor.has_value() && otherAccessor.has_value())
       if (*opAccessor != *otherAccessor &&
           loop.isDefinedOutsideOfLoop(*opAccessor) &&
@@ -585,7 +567,7 @@ collectHoistableOperations(LoopLikeOpInterface loop,
                }))
       continue;
 
-    ArrayRef<AccessorPtrPairType> accessorPairs =
+    ArrayRef<sycl::AccessorPtrPairType> accessorPairs =
         candidate.getRequireNoOverlapAccessorPairs();
     bool requireVersioning = !accessorPairs.empty();
     bool willVersion = requireVersioning && EnableLICMSYCLAccessorVersioning &&
@@ -620,7 +602,7 @@ static size_t moveLoopInvariantCode(LoopLikeOpInterface loop,
   size_t numOpsHoisted = 0;
   std::set<const Operation *> opsHoisted;
   for (const LICMCandidate &candidate : LICMCandidates) {
-    ArrayRef<AccessorPtrPairType> accessorPairs =
+    ArrayRef<sycl::AccessorPtrPairType> accessorPairs =
         candidate.getRequireNoOverlapAccessorPairs();
     if (!accessorPairs.empty()) {
       OpBuilder builder(loop);

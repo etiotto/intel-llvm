@@ -621,7 +621,7 @@ VersionConditionBuilder::createSCFCondition(OpBuilder builder,
   };
 
   Value condition;
-  for (const AccessorPtrPairType &accessorPair : accessorPairs) {
+  for (const sycl::AccessorPtrPairType &accessorPair : accessorPairs) {
     Value begin1 = getSYCLAccessorBegin(accessorPair.first, builder, loc);
     Value end1 = getSYCLAccessorEnd(accessorPair.first, builder, loc);
     Value begin2 = getSYCLAccessorBegin(accessorPair.second, builder, loc);

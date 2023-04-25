@@ -428,6 +428,22 @@ inline raw_ostream &operator<<(raw_ostream &os,
   return os;
 }
 
+class MemoryAccessAnalysis {
+public:
+  MemoryAccessAnalysis() = default;
+
+  template <typename OpTy> static constexpr bool isValid() {
+    return std::is_same_v<OpTy, AffineLoadOp> ||
+           std::is_same_v<OpTy, AffineStoreOp>;
+  }
+
+  template <typename OpTy> using IsValidTy = std::enable_if_t<isValid<OpTy>()>;
+
+  /// Return the memory access pattern of a valid affine operation.
+  template <typename OpTy, IsValidTy<OpTy>>
+  MemoryAccessPattern classifyMemoryAccess(OpTy op) const;
+};
+
 } // namespace sycl
 } // namespace mlir
 

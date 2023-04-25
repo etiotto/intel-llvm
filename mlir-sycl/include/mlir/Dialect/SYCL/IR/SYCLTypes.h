@@ -25,19 +25,24 @@
 
 namespace mlir {
 namespace sycl {
+
+using AccessorPtrType = TypedValue<MemRefType>;
+using AccessorPtrPairType = std::pair<AccessorPtrType, AccessorPtrType>;
+
 template <typename Parameter> class SYCLInheritanceTypeTrait {
 public:
   template <typename ConcreteType>
   class Trait : public mlir::TypeTrait::TraitBase<ConcreteType, Trait> {};
 };
 
-/// Return true if the given \p Ty is a SYCL type.
-inline bool isSYCLType(Type Ty) { return isa<SYCLDialect>(Ty.getDialect()); }
+/// Return true if the given \p t is a SYCL type.
+inline bool isSYCLType(Type t) { return isa<SYCLDialect>(t.getDialect()); }
 
 /// Return the number of dimensions of type \p Ty.
-unsigned getDimensions(Type Ty);
+unsigned getDimensions(Type t);
 
-llvm::SmallVector<mlir::TypeID> getDerivedTypes(mlir::TypeID TypeID);
+llvm::SmallVector<mlir::TypeID> getDerivedTypes(mlir::TypeID typeID);
+
 } // namespace sycl
 } // namespace mlir
 

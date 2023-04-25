@@ -255,7 +255,9 @@ TEST(MatrixTest, Shapes) {
   {
     // clang-format off
     MemoryAccessMatrix matrix(
-        {{one, zero, zero}, {zero, one, zero}, {zero, zero, two}});
+        {{one,  zero, zero}, 
+         {zero, one,  zero}, 
+         {zero, zero, two}});
     // clang-format on
 
     EXPECT_THAT(matrix.isDiagonal(solver), true);
