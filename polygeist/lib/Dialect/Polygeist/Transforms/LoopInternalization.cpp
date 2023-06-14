@@ -207,25 +207,29 @@ Value getNdItemArgument(FunctionOpInterface func) {
   return lastArg;
 }
 
-/// Get the size of unused shared local memory arena in bytes.
+/// Get the size of unused shared local memory in bytes.
 unsigned getLocalMemoryRemaining(gpu::GPUModuleOp &module,
-                                 unsigned localMemorySize) {
+                                 const unsigned localMemorySize) {
   assert(module.hasTrait<OpTrait::SymbolTable>() &&
          "Expecting module with SymbolTable trait");
+
   unsigned localMemoryRemaining = localMemorySize;
   module.walk([&localMemoryRemaining](memref::GlobalOp global) {
     MemRefType memRefTy = global.getType();
     if (!isLocalAccessAddrSpace(memRefTy))
       return WalkResult::advance();
+
     unsigned globalSize =
         memRefTy.getElementTypeBitWidth() * memRefTy.getNumElements() / 8;
     if (globalSize >= localMemoryRemaining) {
       localMemoryRemaining = 0;
       return WalkResult::interrupt();
     }
+
     localMemoryRemaining -= globalSize;
     return WalkResult::advance();
   });
+
   return localMemoryRemaining;
 }
 
@@ -240,6 +244,7 @@ getReqdLocalMemory(sycl::AccessorType accTy, const WorkGroupSize &workGroupSize,
   for (unsigned dim = 0; dim < numDims; ++dim)
     reqdLocalMemory =
         ValueOrUnsigned::mul(reqdLocalMemory, workGroupSize[dim], builder);
+
   return reqdLocalMemory;
 }
 
@@ -252,9 +257,11 @@ getReqdLocalMemory(const DenseMap<LoopLikeOpInterface, std::set<Operation *>>
                    const WorkGroupSize &workGroupSize, OpBuilder builder) {
   std::variant<Value, unsigned> reqdLocalMemory =
       ValueOrUnsigned::get(0, builder, workGroupSize.hasElemTy<Value>());
+
   for (auto &entry : loopToSharedMemref) {
     std::variant<Value, unsigned> loopReqdLocalMemory =
         ValueOrUnsigned::get(0, builder, workGroupSize.hasElemTy<Value>());
+
     for (Operation *memref : entry.second) {
       sycl::AccessorType accTy =
           getAccessorType(cast<sycl::SYCLAccessorSubscriptOp>(memref));
@@ -262,10 +269,12 @@ getReqdLocalMemory(const DenseMap<LoopLikeOpInterface, std::set<Operation *>>
           loopReqdLocalMemory,
           getReqdLocalMemory(accTy, workGroupSize, builder), builder);
     }
+
     // Memref in one loop can reuse local memory allocated for another loop.
     reqdLocalMemory =
         ValueOrUnsigned::max(reqdLocalMemory, loopReqdLocalMemory, builder);
   }
+
   return reqdLocalMemory;
 }
 
@@ -273,12 +282,14 @@ getReqdLocalMemory(const DenseMap<LoopLikeOpInterface, std::set<Operation *>>
 unsigned getReqdLocalMemory(sycl::AccessorType accTy,
                             const sycl::ReqdWorkGroupSize &reqdWorkGroupSize) {
   assert(!reqdWorkGroupSize.empty() && "Expecting non-empty reqdWorkGroupSize");
+
   unsigned elemSize = accTy.getType().getIntOrFloatBitWidth() / 8;
   unsigned memrefReqdLocalMemory = elemSize;
   const unsigned numDims = accTy.getDimension();
-  for (unsigned dim = 0; dim < numDims; ++dim) {
+
+  for (unsigned dim = 0; dim < numDims; ++dim)
     memrefReqdLocalMemory *= reqdWorkGroupSize[dim];
-  }
+
   return memrefReqdLocalMemory;
 }
 
@@ -300,9 +311,11 @@ getReqdLocalMemory(const DenseMap<LoopLikeOpInterface, std::set<Operation *>>
           getAccessorType(cast<sycl::SYCLAccessorSubscriptOp>(memref));
       loopReqdLocalMemory += getReqdLocalMemory(accTy, reqdWorkGroupSize);
     }
+
     // Memref in one loop can reuse local memory allocated for another loop.
     reqdLocalMemory = std::max(reqdLocalMemory, loopReqdLocalMemory);
   }
+
   return reqdLocalMemory;
 }
 
@@ -310,6 +323,7 @@ getReqdLocalMemory(const DenseMap<LoopLikeOpInterface, std::set<Operation *>>
 memref::GlobalOp getWorkGroupLocalMemory(gpu::GPUModuleOp module,
                                          unsigned size) {
   assert(size != 0 && "Expecting non-zero size");
+
   std::string name("WGLocalMem");
   polygeist::getUniqueSymbolName(name, module);
   OpBuilder globalBuilder(module->getRegion(0));
@@ -341,16 +355,20 @@ memref::ViewOp createViewOp(sycl::AccessorType accTy, Value offset,
       sizes.push_back(std::get<Value>(size));
     }
   }
+
   auto resTy = MemRefType::get(
       shape, accTy.getType(), MemRefLayoutAttrInterface(),
       sycl::AccessAddrSpaceAttr::get(builder.getContext(),
                                      sycl::AccessAddrSpace::LocalAccess));
+
   return builder.create<memref::ViewOp>(loc, resTy, source, offset, sizes);
 }
 
 /// Tile an affine for \p loop given the tile size \p tileSize.
 LogicalResult tile(affine::AffineForOp loop, Value tileSize,
                    SmallVectorImpl<affine::AffineForOp> &tiledNest) {
+  assert(tiledNest.empty() && "'tiledNest' should be empty");
+
   SmallVector<affine::AffineForOp> newNestedLoops;
   LogicalResult res =
       tilePerfectlyNestedParametric({loop}, tileSize, &newNestedLoops);
@@ -479,9 +497,8 @@ SmallVector<Value> getIndexes(sycl::SYCLAccessorSubscriptOp accSub,
   SmallVector<Value> indexes;
   for (unsigned i = constructorOp->getNumOperands() - 1;
        i != std::numeric_limits<unsigned>::max(); --i) {
-    if (i == constructorOp.getOutputOperandIndex())
-      continue;
-    indexes.push_back(constructorOp->getOperand(i));
+    if (i != constructorOp.getOutputOperandIndex())
+      indexes.push_back(constructorOp->getOperand(i));
   }
 
   return indexes;
@@ -545,6 +562,7 @@ WorkGroupSize::WorkGroupSize(Value ndItem,
   assert((reqdWorkGroupSize.empty() || reqdWorkGroupSize.size() == numDims) &&
          "Expecting reqdWorkGroupSize to have same number of elements as "
          "nd_item dimension");
+
   for (unsigned dim = 0; dim < numDims; ++dim) {
     /// Use constants provided by reqd_work_group_size if given (non-empty).
     if (!reqdWorkGroupSize.empty())
@@ -822,7 +840,22 @@ private:
                          MemoryAccessAnalysis &memAccessAnalysis,
                          AliasAnalysis &aliasAnalysis, DataFlowSolver &solver);
 
-  /// Determine the tile size for \p loop.
+  /// Analyze the memory accesses that should use shared memory and aggregate
+  /// which dimensions use the loop induction variable.
+  /// For example given (assume 'i' is the loop IV):
+  ///   A[tx][ty][i], B[tx][i][ty]
+  /// The set collected would contain {0,1}.
+  std::set<unsigned> getDimsThatUseLoopIV(LoopLikeOpInterface loop,
+                                          DataFlowSolver &solver) const;
+
+  /// Generate the versioning condition if the loop should be versioned. Rerun
+  /// nullptr if the loop doesn't need to be versioned.
+  Value getVersionCondition(LoopLikeOpInterface loop,
+                            const WorkGroupSize &workGroupSize,
+                            DataFlowSolver &solver) const;
+
+  /// Determine the tile size for \p loop given \p workGroupSize.
+  /// Note: currently the tile size is equal to the work group size.
   Value getTileSize(LoopLikeOpInterface loop,
                     const WorkGroupSize &workGroupSize,
                     DataFlowSolver &solver) const;
@@ -964,29 +997,69 @@ void LoopInternalization::selectMemorySpace(
   });
 }
 
-Value LoopInternalization::getTileSize(LoopLikeOpInterface loop,
-                                       const WorkGroupSize &workGroupSize,
-                                       DataFlowSolver &solver) const {
-  // Use workgroup size as tile size.
-  OpBuilder builder(loop);
-  Value inductionVar = *loop.getSingleInductionVar();
-  std::optional<unsigned> ivDim = std::nullopt;
+std::set<unsigned>
+LoopInternalization::getDimsThatUseLoopIV(LoopLikeOpInterface loop,
+                                          DataFlowSolver &solver) const {
+  const Value indVar = *loop.getSingleInductionVar();
+  std::set<unsigned> dimsThatUseLoopIV;
+
   for (Operation *memref : loopToSharedMemref.at(loop)) {
     auto accSub = cast<sycl::SYCLAccessorSubscriptOp>(memref);
     const SmallVector<Value> indexes = getIndexes(accSub, solver);
-    for (unsigned dim = 0; dim < indexes.size(); ++dim)
-      if (usesValue(indexes[dim], inductionVar)) {
-        if (!ivDim.has_value())
-          ivDim = dim;
-        else if (ivDim != dim) {
-          // TODO: Version with workGroupSize[ivDim] == workGroupSize[dim].
-        }
-      }
+
+    for (unsigned dim = 0; dim < indexes.size(); ++dim) {
+      if (usesValue(indexes[dim], indVar))
+        dimsThatUseLoopIV.insert(dim);
+    }
   }
 
-  assert(ivDim.has_value() &&
-         "Expecting candidate memref indexes to use loop induction variable");
-  return ValueOrUnsigned::getValue(workGroupSize[*ivDim], builder);
+  return dimsThatUseLoopIV;
+}
+
+Value LoopInternalization::getVersionCondition(
+    LoopLikeOpInterface loop, const WorkGroupSize &workGroupSize,
+    DataFlowSolver &solver) const {
+  // Find out which dimensions use the loop IV in the memory accesses that
+  // should use shared memory. For example given (assume 'i' is the loop IV):
+  //   A[tx][ty][i], B[tx][i][ty]
+  // The set collected would contain {0,1}.
+  std::set<unsigned> dimsThatUseLoopIV = getDimsThatUseLoopIV(loop, solver);
+  if (dimsThatUseLoopIV.size() <= 1)
+    return nullptr;
+
+  // If the memory accesses do not use the loop induction variable
+  // 'consistently' (that is on the same dimension) we need to version the
+  // loop. Build the versioning condition as:
+  //   (wgSize[dim1] == wgSize[dim2]) && wgSize[dim1] == wgSize[dim3] && ...)
+  OpBuilder builder(loop);
+  Value versionCond, first;
+  for (unsigned dim : dimsThatUseLoopIV) {
+    Value wgSize = ValueOrUnsigned::getValue(workGroupSize[dim], builder);
+
+    if (!versionCond)
+      versionCond = first = wgSize;
+    else if (isa<arith::CmpIOp, arith::AndIOp>(versionCond.getDefiningOp()))
+      versionCond = builder.create<arith::AndIOp>(
+          loop.getLoc(), versionCond,
+          builder.create<arith::CmpIOp>(loop.getLoc(), arith::CmpIPredicate::eq,
+                                        first, wgSize));
+    else
+      versionCond = builder.create<arith::CmpIOp>(
+          loop.getLoc(), arith::CmpIPredicate::eq, first, wgSize);
+  }
+
+  return versionCond;
+}
+
+Value LoopInternalization::getTileSize(LoopLikeOpInterface loop,
+                                       const WorkGroupSize &workGroupSize,
+                                       DataFlowSolver &solver) const {
+  std::set<unsigned> dimsThatUseLoopIV = getDimsThatUseLoopIV(loop, solver);
+  assert(!dimsThatUseLoopIV.empty() && "set should not be empty");
+
+  OpBuilder builder(loop);
+  return ValueOrUnsigned::getValue(workGroupSize[*dimsThatUseLoopIV.begin()],
+                                   builder);
 }
 
 void LoopInternalization::transform(FunctionOpInterface func,
@@ -1064,6 +1137,9 @@ void LoopInternalization::transform(T loop,
          "Expecting valid localIDs");
   assert(loopToSharedMemref.find(loop) != loopToSharedMemref.end() &&
          "Loop should be in the map");
+
+  // TODO: Version the loop if necessary.
+  Value versionCond = getVersionCondition(loop, workGroupSize, solver);
 
   OpBuilder builder(loop);
   auto getGlobalOp = builder.create<memref::GetGlobalOp>(
